@@ -218,14 +218,19 @@ class LSTR1Calibrator(CameraR1Calibrator):
                 event.r1.tel[telid].waveform = samples.astype('float32')
 
 
-def interpolate_spike_A(event, gain, pos, pixel, nr_module):
-    samples = event.r1.tel[0].waveform[gain, pixel + nr_module * 7, :]
+def interpolate_spike_A(event, gain, pos, pixel, nr_clus):
+    samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
     a = int(samples[pos-1])
     b = int(samples[pos+2])
     value1 = samples[pos - 1] + (0.33 * (b-a))
     value2 = samples[pos - 1] + (0.66 * (b-a))
-    event.r1.tel[0].waveform[gain, pixel + nr_module * 7, pos] = value1
-    event.r1.tel[0].waveform[gain, pixel + nr_module * 7, pos+1] = value2
+    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos] = value1
+    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos+1] = value2
+
+def interpolate_spike_B(event, gain, spike_b_pos, pixel, nr_clus):
+    samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
+    value = 0.5 * (samples[spike_b_pos - 1] + samples[spike_b_pos + 1])
+    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, spike_b_pos] = value
 
 def time_corr():
     pass
@@ -240,7 +245,7 @@ def ped_time(timediff):
 def get_first_capacitor(event, nr):
     hg = 0
     lg = 1
-    fc = np.zeros((2, 8))
+    fc = np.zeros((2, 7))
     first_cap = event.lst.tel[0].evt.first_capacitor_id[nr * 8:(nr + 1) * 8]
     for i, j in zip([0, 1, 2, 3, 4, 5, 6], [0, 0, 1, 1, 2, 2, 3]):
         fc[hg, i] = first_cap[j]
