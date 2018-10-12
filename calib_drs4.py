@@ -1,6 +1,8 @@
 from abc import abstractmethod
 import numpy as np
 
+from numba import jit, njit, prange
+
 from ctapipe.core import Component
 from ctapipe.core.traits import Unicode
 
@@ -116,41 +118,47 @@ class LSTR1Calibrator(CameraR1Calibrator):
 
         self._load_calib()
 
+        self.gain_range = range(0, 2)
+        self.pixel_range = range(0, 7)
+        self.roi_range = range(0, 40)
     def calibrate(self, event):
         """
         Perform calibration on event using pedestal file.
-        If pedestal file is wrong raise ValueError Exception.
         Parameters
         ----------
         event : `ctapipe` event-container
         """
-        samples = np.zeros((event.r0.tel[self.telid].waveform.shape), dtype=np.uint16)
-        event.r1.tel[self.telid].waveform = samples
+        event.r1.tel[self.telid].waveform = np.zeros(event.r0.tel[self.telid].waveform.shape, dtype=np.uint16)
+        fc_all = np.zeros((self.number_of_modules_from_file, 2, 7))
 
-        event_number_of_modules = event.lst.tel[0].svc.num_modules
-        if event_number_of_modules == self.number_of_modules_from_file:
-            for nr_module in range(0, event_number_of_modules):
-                first_cap = self._get_first_capacitor(event, nr_module)
-                for gain in range(0, 2):
-                    for pixel in range(0, self.n_pixels):
-                        for roi in range(0, self.roisize):
-                            position = int((roi + first_cap[gain, pixel]) % self.size4drs)
-                            val = (
-                                          event.r0.tel[0].waveform[gain, pixel + nr_module * 7, roi]
-                                          - int(self.pedestal_value_array[nr_module, gain,
-                                                                          pixel, position])
-                                  ) + self.offset
-                            event.r1.tel[self.telid].waveform[
-                                gain, pixel + nr_module * 7, roi] = val
-        else:
-            self.log.error("No match number of modules {} in pedestal file,"
-                           " to number of modules {} in event-container. "
-                           "Check if path to pedestal file is correct. ".
-                           format(self.number_of_modules_from_file,
-                                  event_number_of_modules))
+        for nr_module in range(0, self.number_of_modules_from_file):
+            fc_all[nr_module, :, :] = self._get_first_capacitor(event, nr_module)
+     #       first_cap = self._get_first_capacitor(event, nr_module)
+     #       for gain in self.gain_range:
+     #           for pixel in self.pixel_range:
+     #               position = int((first_cap[gain, pixel]) % self.size4drs)
+     #               event.r1.tel[self.telid].waveform[gain, pixel + nr_module * 7, :] = \
+     #                   (event.r0.tel[self.telid].waveform[gain, pixel + nr_module * 7, :] -
+     #                    self.pedestal_value_array[nr_module, gain, pixel, position:position+40])
 
-            raise ValueError("Wrong pedestal file")
+        event.r1.tel[self.telid].waveform[:, :, :] = self.calibrate_jit(event.r0.tel[self.telid].waveform, fc_all,
+                                                                        self.pedestal_value_array,
+                                                                        self.number_of_modules_from_file)
 
+    @staticmethod
+    @njit(parallel=True)
+    def calibrate_jit(event_waveform, fc_cap, pedestal_value_array, nr_clus):
+        ev_waveform = np.zeros(event_waveform.shape)
+        size4drs = 4096
+        #first_cap = np.zeros((2, 7))
+        for nr in prange(0, nr_clus):
+            for gain in prange(0, 2):
+                for pixel in prange(0, 7):
+                    position = int((fc_cap[nr, gain, pixel]) % size4drs)
+                    ev_waveform[gain, pixel + nr * 7, :] = \
+                        (event_waveform[gain, pixel + nr * 7, :] -
+                         pedestal_value_array[nr, gain, pixel, position:position+40])
+        return ev_waveform
 
     def _load_calib(self):
         """
@@ -166,7 +174,7 @@ class LSTR1Calibrator(CameraR1Calibrator):
                 self.number_of_modules_from_file = int.from_bytes(data[7:9],
                                                                   byteorder='big')
                 self.pedestal_value_array = np.zeros((self.number_of_modules_from_file, 2,
-                                                      self.n_pixels, self.size4drs))
+                                                      self.n_pixels, self.size4drs+40))
                 self.log.info("Load binary file with pedestal version {}: {} ".format(
                     file_version, self.pedestal_path))
                 self.log.info("Number of modules in file: {}".format(
@@ -178,9 +186,10 @@ class LSTR1Calibrator(CameraR1Calibrator):
                         for pixel in range(0, self.n_pixels):
                             for cap in range(0, self.size4drs):
                                 value = int.from_bytes(data[start_byte:start_byte + 2],
-                                                       byteorder='big')
+                                                       byteorder='big') -300
                                 self.pedestal_value_array[i, gain, pixel, cap] = value
                                 start_byte += 2
+                            self.pedestal_value_array[i, gain, pixel, self.size4drs:self.size4drs+40] = self.pedestal_value_array[i, gain, pixel, 0:40]
         else:
             self.log.warning("No pedestal path supplied, "
                              "r1 samples will equal r0 samples.")
@@ -194,7 +203,7 @@ class LSTR1Calibrator(CameraR1Calibrator):
         event : `ctapipe` event-container
         nr_module : number of module
         """
-        fc = np.zeros((2, 8))
+        fc = np.zeros((2, 7))
         first_cap = event.lst.tel[0].evt.first_capacitor_id[nr_module * 8:
                                                             (nr_module + 1) * 8]
         for i, j in zip([0, 1, 2, 3, 4, 5, 6], [0, 0, 1, 1, 2, 2, 3]):
