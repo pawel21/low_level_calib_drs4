@@ -118,9 +118,13 @@ class LSTR1Calibrator(CameraR1Calibrator):
 
         self._load_calib()
 
-        self.gain_range = range(0, 2)
-        self.pixel_range = range(0, 7)
-        self.roi_range = range(0, 40)
+        self.offset = 300
+
+        self.first_cap_array = np.zeros((self.number_of_modules_from_file, 2, 7))
+        self.fc_old_array = np.zeros((self.number_of_modules_from_file, 2, 7))
+
+        self.last_time_array = np.zeros((self.number_of_modules_from_file, 2, 7, 4096))
+
     def calibrate(self, event):
         """
         Perform calibration on event using pedestal file.
@@ -129,28 +133,52 @@ class LSTR1Calibrator(CameraR1Calibrator):
         event : `ctapipe` event-container
         """
         event.r1.tel[self.telid].waveform = np.zeros(event.r0.tel[self.telid].waveform.shape, dtype=np.uint16)
-        fc_all = np.zeros((self.number_of_modules_from_file, 2, 7))
+
+        self.fc_old_array[:, :, :] = self.first_cap_array[:, :, :]
+
 
         for nr_module in range(0, self.number_of_modules_from_file):
-            fc_all[nr_module, :, :] = self._get_first_capacitor(event, nr_module)
-     #       first_cap = self._get_first_capacitor(event, nr_module)
-     #       for gain in self.gain_range:
-     #           for pixel in self.pixel_range:
-     #               position = int((first_cap[gain, pixel]) % self.size4drs)
-     #               event.r1.tel[self.telid].waveform[gain, pixel + nr_module * 7, :] = \
-     #                   (event.r0.tel[self.telid].waveform[gain, pixel + nr_module * 7, :] -
-     #                    self.pedestal_value_array[nr_module, gain, pixel, position:position+40])
+            self.first_cap_array[nr_module, :, :] = self._get_first_capacitor(event, nr_module)
 
-        event.r1.tel[self.telid].waveform[:, :, :] = self.calibrate_jit(event.r0.tel[self.telid].waveform, fc_all,
+        event.r1.tel[self.telid].waveform[:, :, :] = self.calibrate_jit(event.r0.tel[self.telid].waveform,
+                                                                        self.first_cap_array,
                                                                         self.pedestal_value_array,
                                                                         self.number_of_modules_from_file)
 
+        EVB = event.lst.tel[0].evt.counters
+        for nr_clus in range(0, self.number_of_modules_from_file):
+            time_now = int64(EVB[14 + (nr_clus * 22): 22 + (nr_clus * 22)])
+            for gain in range(0, 2):
+                for pixel in range(0, 7):
+                    posads0 = int((0 + self.first_cap_array[nr_clus, gain, pixel]) % self.size4drs)
+                    if posads0 + 40 < 4096:
+                        self.time_corr_version1(event, nr_clus, gain, pixel, posads0, time_now)
+                    else:
+                        self.time_corr_version2(event, self.first_cap_array[nr_clus, :, :],
+                                                nr_clus, gain, pixel, time_now)
+
+                    for k in range(0, 4):
+                        abspos = int(
+                            1024 - self.roisize - 2 - self.fc_old_array[nr_clus, gain, pixel] + k * 1024 + self.size4drs)
+                        pos = int((abspos - self.first_cap_array[nr_clus, gain, pixel] + self.size4drs) % self.size4drs)
+                        if (pos > 2 and pos < 38):
+                            self.interpolate_spike_A(event, gain, pos, pixel, nr_clus)
+
+                        abspos = int(
+                            self.roisize - 2 + self.fc_old_array[nr_clus, gain, pixel] + k * 1024 + self.size4drs)
+                        pos = int((abspos - self.first_cap_array[nr_clus, gain, pixel] + self.size4drs) % self.size4drs)
+                        if (pos > 2 and pos < 38):
+                            self.interpolate_spike_A(event, gain, pos, pixel, nr_clus)
+
+                        spike_b_pos = int((self.fc_old_array[nr_clus, gain, pixel] - 1 -
+                                           self.first_cap_array[nr_clus, gain, pixel] + 2 * self.size4drs) % self.size4drs)
+                        if spike_b_pos < self.roisize - 1:
+                            self.interpolate_spike_B(event, gain, spike_b_pos, pixel, nr_clus)
     @staticmethod
     @njit(parallel=True)
     def calibrate_jit(event_waveform, fc_cap, pedestal_value_array, nr_clus):
         ev_waveform = np.zeros(event_waveform.shape)
         size4drs = 4096
-        #first_cap = np.zeros((2, 7))
         for nr in prange(0, nr_clus):
             for gain in prange(0, 2):
                 for pixel in prange(0, 7):
@@ -159,6 +187,40 @@ class LSTR1Calibrator(CameraR1Calibrator):
                         (event_waveform[gain, pixel + nr * 7, :] -
                          pedestal_value_array[nr, gain, pixel, position:position+40])
         return ev_waveform
+
+    def time_corr_version2(self, ev, first_cap, nr_clus, gain, pixel, time_now):
+        for k in range(0, 40):
+            posads = int((k + first_cap[gain, pixel]) % self.size4drs)
+            if self.last_time_array[nr_clus, gain, pixel, posads] > 0:
+                time_diff = time_now - self.last_time_array[nr_clus, gain, pixel, posads]
+                val = ev.r1.tel[0].waveform[gain, pixel + nr_clus * 7, k] - ped_time(time_diff / (133.e3))
+                ev.r1.tel[0].waveform[gain, pixel + nr_clus * 7, k] = val
+            if (k < 39):
+                self.last_time_array[nr_clus, gain, pixel, posads] = time_now
+
+    def time_corr_version1(self, ev, nr_clus, gain, pixel, posads0, time_now):
+        position_array = (np.where(self.last_time_array[nr_clus, gain, pixel, posads0:(posads0 + 40)]))[0]
+        if position_array.any():
+            time_diff_array = time_now - self.last_time_array[nr_clus, gain, pixel, posads0:(posads0 + 40)]
+            val = ev.r1.tel[0].waveform[gain, pixel + nr_clus * 7, position_array] - ped_time(
+                time_diff_array[position_array] / (133.e3))
+            ev.r1.tel[0].waveform[gain, pixel + nr_clus * 7, position_array] = val
+
+        self.last_time_array[nr_clus, gain, pixel, posads0:(posads0 + 39)] = time_now
+
+    def interpolate_spike_A(self, event, gain, pos, pixel, nr_clus):
+        samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
+        a = int(samples[pos-1])
+        b = int(samples[pos+2])
+        value1 = samples[pos - 1] + (0.33 * (b-a))
+        value2 = samples[pos - 1] + (0.66 * (b-a))
+        event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos] = value1
+        event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos+1] = value2
+
+    def interpolate_spike_B(self, event, gain, spike_b_pos, pixel, nr_clus):
+        samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
+        value = 0.5 * (samples[spike_b_pos - 1] + samples[spike_b_pos + 1])
+        event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, spike_b_pos] = value
 
     def _load_calib(self):
         """
@@ -186,7 +248,7 @@ class LSTR1Calibrator(CameraR1Calibrator):
                         for pixel in range(0, self.n_pixels):
                             for cap in range(0, self.size4drs):
                                 value = int.from_bytes(data[start_byte:start_byte + 2],
-                                                       byteorder='big') -300
+                                                       byteorder='big') - self.offset
                                 self.pedestal_value_array[i, gain, pixel, cap] = value
                                 start_byte += 2
                             self.pedestal_value_array[i, gain, pixel, self.size4drs:self.size4drs+40] = self.pedestal_value_array[i, gain, pixel, 0:40]
@@ -227,22 +289,6 @@ class LSTR1Calibrator(CameraR1Calibrator):
                 event.r1.tel[telid].waveform = samples.astype('float32')
 
 
-def interpolate_spike_A(event, gain, pos, pixel, nr_clus):
-    samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
-    a = int(samples[pos-1])
-    b = int(samples[pos+2])
-    value1 = samples[pos - 1] + (0.33 * (b-a))
-    value2 = samples[pos - 1] + (0.66 * (b-a))
-    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos] = value1
-    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, pos+1] = value2
-
-def interpolate_spike_B(event, gain, spike_b_pos, pixel, nr_clus):
-    samples = event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, :]
-    value = 0.5 * (samples[spike_b_pos - 1] + samples[spike_b_pos + 1])
-    event.r1.tel[0].waveform[gain, pixel + nr_clus * 7, spike_b_pos] = value
-
-def time_corr():
-    pass
 
 def int64(x):
     return x[0] + x[1] * 256 + x[2] * 256 ** 2 + x[3] * 256 ** 3 + x[4] * 256 ** 4 + x[5] * 256 ** 5 + x[
