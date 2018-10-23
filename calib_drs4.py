@@ -135,9 +135,9 @@ class LSTR1Calibrator(CameraR1Calibrator):
         event.r1.tel[self.telid].waveform = np.zeros(event.r0.tel[self.telid].waveform.shape, dtype=np.uint16)
 
         self.fc_old_array[:, :, :] = self.first_cap_array[:, :, :]
+        number_of_modules = event.lst.tel[0].svc.num_modules
 
-
-        for nr_module in range(0, self.number_of_modules_from_file):
+        for nr_module in range(0, number_of_modules):
             self.first_cap_array[nr_module, :, :] = self._get_first_capacitor(event, nr_module)
 
         event.r1.tel[self.telid].waveform[:, :, :] = self.calibrate_jit(event.r0.tel[self.telid].waveform,
@@ -174,6 +174,7 @@ class LSTR1Calibrator(CameraR1Calibrator):
                                            self.first_cap_array[nr_clus, gain, pixel] + 2 * self.size4drs) % self.size4drs)
                         if spike_b_pos < self.roisize - 1:
                             self.interpolate_spike_B(event, gain, spike_b_pos, pixel, nr_clus)
+
     @staticmethod
     @njit(parallel=True)
     def calibrate_jit(event_waveform, fc_cap, pedestal_value_array, nr_clus):
