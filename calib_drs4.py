@@ -143,10 +143,10 @@ class LSTR1Calibrator(CameraR1Calibrator):
         event.r1.tel[self.telid].waveform[:, :, :] = self.calibrate_jit(event.r0.tel[self.telid].waveform,
                                                                         self.first_cap_array,
                                                                         self.pedestal_value_array,
-                                                                        self.number_of_modules_from_file)
+                                                                        number_of_modules)
 
         EVB = event.lst.tel[0].evt.counters
-        for nr_clus in range(0, self.number_of_modules_from_file):
+        for nr_clus in range(0, number_of_modules):
             time_now = int64(EVB[14 + (nr_clus * 22): 22 + (nr_clus * 22)])
             for gain in range(0, 2):
                 for pixel in range(0, 7):
