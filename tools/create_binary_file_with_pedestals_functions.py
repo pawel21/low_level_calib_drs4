@@ -29,18 +29,21 @@ class DragonPedestal:
         for i in range(0, 2):
             for j in range(0, self.n_pixels):
                 fc = int(self.first_capacitor[i, j])
-                for k in range(2, self.roisize-2):
-                    posads = int((k+fc)%self.size4drs)
-                    val = waveform[i, j, k]
-                    self.meanped[i, j, posads] += val
-                    self.numped[i, j, posads] += 1
-                    self.rms[i, j, posads] += val**2
+                posads0 = int((2+fc)%self.size4drs)
+                if posads0 + 40 < 4096:
+                    self.meanped[i, j, (posads0+2):(posads0+38)] += waveform[i, j, 2:38]
+                    self.numped[i, j, (posads0 + 2):(posads0 + 38)] += 1
+                else:
+                    for k in range(2, self.roisize-2):
+                        posads = int((k+fc)%self.size4drs)
+                        val = waveform[i, j, k]
+                        self.meanped[i, j, posads] += val
+                        self.numped[i, j, posads] += 1
 
     def finalize_pedestal(self):
         try:
             self.meanped = self.meanped/self.numped
             self.rms = self.rms/self.numped
-            self.rms = np.sqrt(self.rms - self.meanped**2)
         except Exception as err:
             print(err)
 
