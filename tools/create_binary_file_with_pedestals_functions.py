@@ -31,8 +31,8 @@ class DragonPedestal:
                 fc = int(self.first_capacitor[i, j])
                 posads0 = int((2+fc)%self.size4drs)
                 if posads0 + 40 < 4096:
-                    self.meanped[i, j, (posads0+2):(posads0+38)] += waveform[i, j, 2:38]
-                    self.numped[i, j, (posads0 + 2):(posads0 + 38)] += 1
+                    self.meanped[i, j, posads0:(posads0+36)] += waveform[i, j, 2:38]
+                    self.numped[i, j, posads0:(posads0 + 36)] += 1
                 else:
                     for k in range(2, self.roisize-2):
                         posads = int((k+fc)%self.size4drs)
