@@ -56,9 +56,8 @@ class DragonPedestal:
         try:
             self.meanped = self.meanped/self.numped
         except Exception as err:
+            print("Not enough events to coverage all capacitor. Please use more file to create pedestal file.")
             print(err)
-            print("Not enough events to coverage all capacitor. "
-                  "Please use more file to create pedestal file.")
 
 
 def get_first_capacitor(event, nr):
@@ -101,7 +100,8 @@ for file_path in args.input_file:
     using_files_name += (file_path.split("/")[-1])
     using_files_name += ", "
     input_file_reader = LSTEventSource(input_url=file_path)
-    for event in input_file_reader:
+    for i, event in enumerate(input_file_reader):
+        print(i)
         for nr_module in range(0, n_modules):
             PedList[nr_module].fill_pedestal_event(event, nr=nr_module)
 
