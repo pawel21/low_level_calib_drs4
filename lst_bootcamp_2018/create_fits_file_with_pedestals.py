@@ -94,13 +94,11 @@ for i in range(0, n_modules):
     PedList.append(DragonPedestal())
 
 using_files_name = ''
-#N_events = 0
 for file_path in args.input_file:
     using_files_name += (file_path.split("/")[-1])
     using_files_name += ", "
     input_file_reader = LSTEventSource(input_url=file_path)
-    for i, event in enumerate(input_file_reader):
-        #N_events +=1
+    for event in input_file_reader:
         for nr_module in range(0, n_modules):
             PedList[nr_module].fill_pedestal_event(event, nr=nr_module)
 
@@ -115,3 +113,5 @@ hdu = fits.PrimaryHDU()
 hdu.data = pedestal_value_array
 hdu.header["DATA"] = using_files_name
 hdu.writeto(args.output_file[0])
+
+
