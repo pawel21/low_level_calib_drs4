@@ -75,17 +75,11 @@ def fill_jit(gain, pixel_ids, first_cap_array, charge, pulse_time, fMeanVal, fNu
         for pix in prange(0, 7):
             pixel = pixel_ids[nr*7 + pix]
             if charge[gain, pixel] > 3000:
-                first_cap = fc[gain, pix]%1024
+                first_cap = (fc[gain, pix])%1024
                 fBin = int(first_cap /fNumCombine)
                 fMeanVal[pixel, fBin] += pulse_time[pixel]
                 fNumMean[pixel, fBin] += 1
 
-def get_corr_time(first_cap, fan, fbn, fNumHarmonics=16, fNumCap=1024):
-    time = fan[0] / 2.
-    for n in range(1, fNumHarmonics):
-        time += fan[n] * np.cos((first_cap * n * 2 * np.pi) / fNumCap)
-        time += fbn[n] * np.sin((first_cap * n * 2 * np.pi) / fNumCap)
-    return time
 
 @njit(fastmath=True, parallel=True)
 def get_first_capacitor_jit(event_fc, first_cap_array):
@@ -106,6 +100,52 @@ def get_first_capacitor(first_capacitor_id, nr_module):
     return fc
 
 
+class ArrivalTimeCorr:
+
+    extractor = LocalPeakWindowSum()
+
+    def __init__(self, fan_array, fbn_array, n_harm, offset=380):
+        self.fan_array = fan_array
+        self.fbn_array = fbn_array
+        self.n_harm = n_harm
+        self.offset = offset
+        self.arrival_time_list = [[] for i in range(1855)]
+        self.arrival_time_corr_list = [[] for i in range(1855)]
+
+    def corr_arrivial_time(self, ev, N_module=265):
+        expected_pixel_id = ev.lst.tel[0].svc.pixel_ids
+        baseline_subtracted = ev.r1.tel[0].waveform[:, :, 2:38] - 380
+        try:
+            charge, pulse_time = self.extractor(baseline_subtracted)
+            pulse_time = extract_pulse_time(baseline_subtracted[0, :, :]) + 2
+            for nr in prange(0, N_module):
+                fc = get_first_capacitor(ev.lst.tel[0].evt.first_capacitor_id, nr)
+                for pix in prange(0, 7):
+                    pixel = expected_pixel_id[nr * 7 + pix]
+                    if charge[0, pixel] > 1000:
+                        self.arrival_time_list[pixel].append(pulse_time[pixel])
+                        corr_pos = get_corr_time(fc[0, pix]%1024, self.fan_array[pixel], self.fbn_array[pixel],
+                                            fNumHarmonics=self.n_harm)
+                        corr_time = pulse_time[pixel] - corr_pos + get_mean_time(self.fan_array[pixel])
+                        self.arrival_time_corr_list[pixel].append(corr_time)
+        except ZeroDivisionError:
+            pass
+
+    def get_arrivial_time_list(self):
+        return self.arrival_time_list
+
+    def get_arrivial_time_corr_list(self):
+        return self.arrival_time_corr_list
+
+
+def get_corr_time(first_cap, fan, fbn, fNumHarmonics=16, fNumCap=1024):
+    time = fan[0] / 2.
+    for n in range(1, fNumHarmonics):
+        time += fan[n] * np.cos((first_cap * n * 2 * np.pi) / fNumCap)
+        time += fbn[n] * np.sin((first_cap * n * 2 * np.pi) / fNumCap)
+    return time
+
+
 def get_corr_time(first_cap, fan, fbn, fNumHarmonics=8, fNumCap=1024):
     time = fan[0] / 2.
     for n in range(1, fNumHarmonics):
@@ -116,6 +156,40 @@ def get_corr_time(first_cap, fan, fbn, fNumHarmonics=8, fNumCap=1024):
 def get_mean_time(fan):
     mean_time = fan[0] / 2.
     return mean_time
+
+def plot_corr_curve(n, n_cap, n_combine, an, bn, fMeanVal):
+    fc = np.arange(0, n_cap, n_combine)
+    y = np.zeros(n)
+
+    for i in range(0, len(y)):
+        temp_cos = an[0] / 2
+        temp_sin = 0
+        for j in range(1, len(an)):
+            temp_cos += an[j] * np.cos(2 * j * np.pi * (fc[i] / 1024.))
+            temp_sin += bn[j] * np.sin(2 * j * np.pi * (fc[i] / 1024.))
+        y[i] = (temp_cos + temp_sin)
+
+    fig, ax = plt.subplots(figsize=(16, 9))
+    ax.plot(np.arange(0, n_cap, n_combine), fMeanVal, 'bo')
+    ax.plot(fc, y, 'r--')
+    ax.set_ylabel("Mean arrival time")
+    ax.set_xlabel("Position in the DRS ring")
+    print("error = {}".format(mean_squared_error(fMeanVal, y)))
+
+def make_hist(arrival_time_list, arrival_time_corr_list, binwidth = 0.5):
+    plt.figure(figsize=(16, 9))
+    plt.hist(arrival_time_list, histtype='step', lw=3, linestyle='--', range=(20, 30),
+             bins=np.arange(min(arrival_time_list), max(arrival_time_list) + binwidth, binwidth),
+             label="before time corr")
+
+    plt.hist(arrival_time_corr_list, histtype='step', lw=3, linestyle='--', color='red', range=(20, 30),
+             bins=np.arange(min(arrival_time_corr_list), max(arrival_time_corr_list) + binwidth, binwidth),
+             label="after time corr")
+    plt.ylabel("Number of events")
+    plt.xlabel("Arrival time [time samples 1 ns]")
+    plt.legend()
+    plt.tight_layout()
+
 
 def extract_pulse_time(waveforms):
     window_shift = 3
