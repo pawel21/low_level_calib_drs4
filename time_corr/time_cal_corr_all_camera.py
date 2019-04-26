@@ -74,7 +74,7 @@ def fill_jit(gain, pixel_ids, first_cap_array, charge, pulse_time, fMeanVal, fNu
         fc =  first_cap_array[nr, :, :]
         for pix in prange(0, 7):
             pixel = pixel_ids[nr*7 + pix]
-            if charge[gain, pixel] > 3000:
+            if charge[gain, pixel] > 1500:
                 first_cap = (fc[gain, pix])%1024
                 fBin = int(first_cap /fNumCombine)
                 fMeanVal[pixel, fBin] += pulse_time[pixel]
@@ -122,11 +122,11 @@ class ArrivalTimeCorr:
                 fc = get_first_capacitor(ev.lst.tel[0].evt.first_capacitor_id, nr)
                 for pix in prange(0, 7):
                     pixel = expected_pixel_id[nr * 7 + pix]
-                    if charge[0, pixel] > 1000:
+                    if charge[0, pixel] > 1500:
                         self.arrival_time_list[pixel].append(pulse_time[pixel])
                         corr_pos = get_corr_time(fc[0, pix]%1024, self.fan_array[pixel], self.fbn_array[pixel],
                                             fNumHarmonics=self.n_harm)
-                        corr_time = pulse_time[pixel] - corr_pos + get_mean_time(self.fan_array[pixel])
+                        corr_time = pulse_time[pixel] - corr_pos #+ get_mean_time(self.fan_array[pixel])
                         self.arrival_time_corr_list[pixel].append(corr_time)
         except ZeroDivisionError:
             pass
@@ -138,20 +138,13 @@ class ArrivalTimeCorr:
         return self.arrival_time_corr_list
 
 
-def get_corr_time(first_cap, fan, fbn, fNumHarmonics=16, fNumCap=1024):
+def get_corr_time(first_cap, fan, fbn, fNumHarmonics, fNumCap=1024):
     time = fan[0] / 2.
     for n in range(1, fNumHarmonics):
         time += fan[n] * np.cos((first_cap * n * 2 * np.pi) / fNumCap)
         time += fbn[n] * np.sin((first_cap * n * 2 * np.pi) / fNumCap)
     return time
 
-
-def get_corr_time(first_cap, fan, fbn, fNumHarmonics=8, fNumCap=1024):
-    time = fan[0] / 2.
-    for n in range(1, fNumHarmonics):
-        time += fan[n] * np.cos((first_cap * n * 2 * np.pi) / fNumCap)
-        time += fbn[n] * np.sin((first_cap * n * 2 * np.pi) / fNumCap)
-    return time
 
 def get_mean_time(fan):
     mean_time = fan[0] / 2.
