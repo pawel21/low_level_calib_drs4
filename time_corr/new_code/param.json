@@ -1,0 +1,29 @@
+{
+   "version": 1,
+
+   "CalibTime": {
+     "max_events": 25,
+     "input_file": "/media/pawel1/ADATA HD330/20191124/LST-1.1.Run01625.0000.fits.fz",
+     "output_file":"calib_time_coeff_test.h5",
+     "n_harm": 24,
+     "log_file": "log.txt",
+     "log_level":"DEBUG"
+   },
+
+   "EventSource": {
+      "max_events": 15000,
+       "input_url": "/media/pawel1/ADATA HD330/20191124/LST-1.1.Run01625.0000.fits.fz"
+   },
+  "LSTR0Corrections": {
+      "pedestal_path": "",
+      "tel_id": 1,
+      "r1_sample_start": 0,
+      "r1_sample_end": 40
+   },
+
+  "FixedWindowSum":{
+     "window_start": 15,
+     "window_width":11
+    }
+
+}

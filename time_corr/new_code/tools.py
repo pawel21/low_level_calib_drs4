@@ -22,6 +22,7 @@ def plot_corr_curve(n, n_cap, n_combine, an, bn, fMeanVal):
     ax.plot(fc, y, 'r--')
     ax.set_ylabel("Mean arrival time")
     ax.set_xlabel("Position in the DRS ring")
+    return fig
 
 def format_axes(ax):
     ax.set_xlabel("")

@@ -47,9 +47,9 @@ class PulseCorrection:
                 pixel = pixel_ids[nr * 7 + pix]
 
                 time = pulse_time[gain, pixel]
-                time_corr = time - get_corr_time(fc%1024, self.fan_array[pixel], self.fbn_array[pixel], self.fNumHarmonics)
-                time_corr_mean = time - get_corr_time(fc%1024, self.fan_array[pixel], self.fbn_array[pixel], self.fNumHarmonics) + np.mean(pulse_time[gain, :])
-                time_corr_relative = time - get_corr_time(fc%1024, self.fan_array[pixel], self.fbn_array[pixel], self.fNumHarmonics) - np.mean(pulse_time[gain, :])
+                time_corr = time - get_corr_time(fc%1024, self.fan_array[gain, pixel], self.fbn_array[gain, pixel], self.fNumHarmonics)
+                time_corr_mean = time - get_corr_time(fc%1024, self.fan_array[gain, pixel], self.fbn_array[gain, pixel], self.fNumHarmonics) + np.mean(pulse_time[gain, :])
+                time_corr_relative = time - get_corr_time(fc%1024, self.fan_array[gain, pixel], self.fbn_array[gain, pixel], self.fNumHarmonics) - np.mean(pulse_time[gain, :])
 
                 time_list.append(time)
                 time_corr_list.append(time_corr)
@@ -58,6 +58,16 @@ class PulseCorrection:
 
         return time_list, time_corr_list, time_corr_mean_list, time_corr_relative_list
 
+    def get_corr_pulse(self, event, pulse):
+        gain = 0
+        pixel_ids = event.lst.tel[self.tel_id].svc.pixel_ids
+        pulse_corr = np.zeros(1855)
+        for nr in range(0, 265):
+            for pix in range(0, 7):
+                fc = self.get_first_capacitor(event, nr)[gain, pix]
+                pixel = pixel_ids[nr * 7 + pix]
+                pulse_corr[pixel] = pulse[pixel] - get_corr_time(fc%1024, self.fan_array[gain, pixel], self.fbn_array[gain, pixel], self.fNumHarmonics)
+        return pulse_corr
 
     def get_first_capacitor(self, event, nr):
         fc = np.zeros((2, 7))
